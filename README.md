@@ -185,6 +185,4 @@ python inference.py
 
 **Ayush Kadali** — Firmware & Embedded Systems Engineer
 - B.Tech CSE (AI & Data Science), MIT-WPU Pune
-- Software Lead, CubeSat flight software (NASA cFS, STM32MP257)
-- ISRO PSLV-C60 payload (STM32H7, FreeRTOS, 0.91 attitude correlation)
-- Expertise: STM32, FreeRTOS, SPI/I2C/UART/DMA, sensor fusion, edge AI
+- Every task in this environment is based on real bugs encountered while building and debugging embedded flight systems
