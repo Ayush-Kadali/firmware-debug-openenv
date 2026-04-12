@@ -1,0 +1,6 @@
+spec_version: 1
+name: firmware_debug_env
+type: space
+runtime: fastapi
+app: firmware_debug_env.server.app:app
+port: 7860

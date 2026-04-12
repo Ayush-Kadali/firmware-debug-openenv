@@ -1,0 +1,36 @@
+[project]
+name = "firmware-debug-env"
+version = "1.0.0"
+description = "OpenEnv environment for AI agents to debug embedded firmware issues on simulated ARM Cortex-M microcontrollers"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Ayush Kadali", email = "ayushkadali@gmail.com" },
+]
+keywords = ["openenv", "firmware", "debugging", "embedded", "reinforcement-learning", "stm32"]
+
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "pydantic>=2.0.0",
+    "openenv-core>=0.1.0",
+    "gradio>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "httpx>=0.24.0",
+    "requests>=2.28.0",
+]
+
+[project.scripts]
+server = "firmware_debug_env.server.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["firmware_debug_env"]
