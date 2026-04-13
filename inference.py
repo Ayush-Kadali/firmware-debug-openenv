@@ -8,12 +8,12 @@ play through all 5 firmware debugging tasks.
 MANDATORY ENV VARS:
     API_BASE_URL   — LLM API endpoint (default: HF router)
     MODEL_NAME     — Model identifier
-    HF_TOKEN       — API key
+    HF_TOKEN       — API key (mandatory, no default)
 
 STDOUT FORMAT (required by hackathon evaluation):
-    [START] task=<task_name> env=firmware_debug model=<model_name>
+    [START] task=<task_name> env=<benchmark> model=<model_name>
     [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
 """
 
 import json
@@ -27,15 +27,18 @@ import requests
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
-# Config
+# Config (follows mandatory variable spec exactly)
 # ---------------------------------------------------------------------------
 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-ENV_BASE_URL = os.getenv("ENV_BASE_URL") or "http://localhost:7860"
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Optional
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
 IMAGE_NAME = os.getenv("IMAGE_NAME")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+
 BENCHMARK = "firmware_debug"
 MAX_STEPS = 20
 
@@ -161,11 +164,11 @@ def run_episode(client: OpenAI, env: FirmwareDebugClient, task_name: str) -> flo
     rewards: List[float] = []
     done = False
     step_num = 0
-    last_error = None
     score = 0.0
 
     try:
         for step_num in range(1, MAX_STEPS + 1):
+            # Get LLM action
             try:
                 response = client.chat.completions.create(
                     model=MODEL_NAME,
@@ -175,31 +178,32 @@ def run_episode(client: OpenAI, env: FirmwareDebugClient, task_name: str) -> flo
                 )
                 llm_text = response.choices[0].message.content or ""
             except Exception as e:
-                last_error = str(e)
+                error_msg = str(e)
                 print(
                     f"[STEP] step={step_num} action=llm_error reward=0.00 "
-                    f"done=false error={last_error}",
+                    f"done=false error={error_msg}",
                     flush=True,
                 )
                 rewards.append(0.0)
                 continue
 
+            # Parse action
             action = extract_json(llm_text)
             if action is None:
-                last_error = "Failed to parse JSON from LLM response"
                 action = {"action_type": "read_log"}
 
             action_str = json.dumps(action, separators=(",", ":"))
             if len(action_str) > 120:
                 action_str = action_str[:117] + "..."
 
+            # Step environment
             try:
                 obs = env.step(action)
             except Exception as e:
-                last_error = str(e)
+                error_msg = str(e)
                 print(
                     f"[STEP] step={step_num} action={action_str} reward=0.00 "
-                    f"done=false error={last_error}",
+                    f"done=false error={error_msg}",
                     flush=True,
                 )
                 rewards.append(0.0)
@@ -208,7 +212,6 @@ def run_episode(client: OpenAI, env: FirmwareDebugClient, task_name: str) -> flo
             reward = float(obs.get("reward", 0.0))
             done = bool(obs.get("done", False))
             obs_error = obs.get("error")
-            last_error = obs_error
 
             rewards.append(reward)
 
@@ -224,6 +227,7 @@ def run_episode(client: OpenAI, env: FirmwareDebugClient, task_name: str) -> flo
                 score = reward
                 break
 
+            # Feed observation back to LLM
             obs_message = obs.get("message", str(obs))
             messages.append({"role": "assistant", "content": llm_text})
             messages.append({"role": "user", "content": f"RESULT:\n{obs_message}"})
@@ -232,20 +236,21 @@ def run_episode(client: OpenAI, env: FirmwareDebugClient, task_name: str) -> flo
             score = max(rewards) if rewards else 0.0
 
     except Exception as e:
-        last_error = str(e)
         traceback.print_exc(file=sys.stderr)
         score = 0.0
 
     finally:
         env.close()
 
+    # Clamp to [0, 1]
     score = max(0.0, min(1.0, score))
-
     success = score > 0.5
+
+    # [END] line — exactly matches spec: success, steps, rewards (NO score field)
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={'true' if success else 'false'} steps={step_num} "
-        f"score={score:.2f} rewards={rewards_str}",
+        f"rewards={rewards_str}",
         flush=True,
     )
 
@@ -257,11 +262,10 @@ def run_episode(client: OpenAI, env: FirmwareDebugClient, task_name: str) -> flo
 # ---------------------------------------------------------------------------
 
 def main():
-    if not API_KEY:
-        print("ERROR: Set HF_TOKEN or API_KEY environment variable", file=sys.stderr)
-        sys.exit(1)
+    if HF_TOKEN is None:
+        raise ValueError("HF_TOKEN environment variable is required")
 
-    client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     env = FirmwareDebugClient(ENV_BASE_URL)
 
     task_filter = os.getenv("FIRMWARE_DEBUG_TASK")
@@ -278,8 +282,8 @@ def main():
 
     print(f"\n{'='*60}", file=sys.stderr)
     print("SUMMARY", file=sys.stderr)
-    for task, score in scores.items():
-        print(f"  {task}: {score:.2f}", file=sys.stderr)
+    for task, s in scores.items():
+        print(f"  {task}: {s:.2f}", file=sys.stderr)
     avg = sum(scores.values()) / len(scores) if scores else 0
     print(f"  AVERAGE: {avg:.2f}", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)
